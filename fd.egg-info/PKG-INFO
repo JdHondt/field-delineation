@@ -1,0 +1,10 @@
+Metadata-Version: 2.1
+Name: fd
+Version: 1.0.0
+Summary: EO Research Field Delineation
+Home-page: https://gitlab.com/nivaeu/uc2_fielddelineation
+Author: Sinergise EO research team
+Author-email: eoresearch@sinergise.com
+Requires-Python: >=3.6
+Provides-Extra: DEV
+License-File: LICENSE

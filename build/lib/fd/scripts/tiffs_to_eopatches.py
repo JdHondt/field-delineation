@@ -12,14 +12,10 @@ import sys
 import json
 import logging
 import argparse
-import glob
-import re
-import os
 
 import geopandas as gpd
 
-# from eolearn.core import EOExecutor
-from fd.eoexecution import EOExecutor
+from eolearn.core import EOExecutor
 
 from fd.tiffs_to_eopatch import (
     TiffsToEopatchConfig,
@@ -48,7 +44,6 @@ def convert_tiff_to_eopatches(config: dict):
     tiffs_to_eops_config = TiffsToEopatchConfig(
         tiffs_folder=config['tiffs_folder'],
         eopatches_folder=config['eopatches_folder'],
-        masks_folder=config['masks_folder'],
         band_names=config['band_names'],
         data_name=config['data_name'],
         mask_name=config['mask_name'],
@@ -63,17 +58,14 @@ def convert_tiff_to_eopatches(config: dict):
     workflow = get_tiffs_to_eopatches_workflow(tiffs_to_eops_config, delete_tiffs=False)
 
     # eopatch_list = grid_definition.name.values
-    # eopatch_list = [str(a) for a in range(100)]
-    tiffnames = os.listdir(tiffs_to_eops_config.masks_folder + "/masks")
-    eopatch_list = set([re.sub(".tiff", "", name) for name in tiffnames])
+    eopatch_list = ['a' for a in range(100)]
 
     exec_args = get_exec_args(workflow, eopatch_list)
 
     executor = EOExecutor(workflow, exec_args, save_logs=True, logs_folder='.')
 
     LOGGER.info('Execute conversion')
-    # executor.run(workers=config['max_workers'])
-    executor.run(multiprocess=False)
+    executor.run(workers=config['max_workers'])
 
     executor.make_report()
     LOGGER.info(f'Report was saved to location: {executor.get_report_filename()}')

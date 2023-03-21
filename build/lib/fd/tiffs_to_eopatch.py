@@ -13,7 +13,7 @@ Tasks used for batch results handling
 """
 import ast
 import json
-from datetime import datetime, date
+from datetime import datetime
 
 from dataclasses import dataclass
 from typing import List, Tuple, Union
@@ -21,14 +21,10 @@ from typing import List, Tuple, Union
 import fs
 import numpy as np
 
-from .eodata import EOPatch, FeatureType, OverwritePermission
-# from eolearn.core import EOWorkflow, SaveTask, MergeFeatureTask, RemoveFeature, \
-    # RenameFeature, LinearWorkflow
-from .core_tasks import SaveTask, MergeFeatureTask, RemoveFeature, RenameFeature
-from .eotask import EOTask
-from .eoworkflow import EOWorkflow, LinearWorkflow
-from .fs_utils import get_base_filesystem_and_path
-from .local_io import ImportFromTiff
+from eolearn.core import EOPatch, EOTask, FeatureType, EOWorkflow, SaveTask, MergeFeatureTask, RemoveFeature, \
+    RenameFeature, OverwritePermission, LinearWorkflow
+from eolearn.core.fs_utils import get_base_filesystem_and_path
+from eolearn.io import ImportFromTiff
 
 from s2cloudless import S2PixelCloudDetector
 
@@ -36,10 +32,9 @@ from .utils import BaseConfig, set_sh_config
 
 
 @dataclass
-class TiffsToEopatchConfig():
+class TiffsToEopatchConfig(BaseConfig):
     tiffs_folder: str
     eopatches_folder: str
-    masks_folder: str
     band_names: List[str]
     mask_name: str
     data_name: str = 'BANDS'
@@ -81,9 +76,8 @@ class AddTimestampsUpdateTime(EOTask):
         :param eopatch: Name of the eopatch to process
         :param tile_name: Name of the tile to process
         """
-        # dates = self._get_valid_dates(tile_name)
-        # eopatch.timestamp = dates
-        eopatch.timestamp = [datetime(2019,i,1) for i in range(3,9)]
+        dates = self._get_valid_dates(tile_name)
+        eopatch.timestamp = dates
         return eopatch
 
 
@@ -161,19 +155,19 @@ def get_tiffs_to_eopatches_workflow(config: TiffsToEopatchConfig, delete_tiffs: 
     sh_config = set_sh_config(config)
 
     import_bands = [(ImportFromTiff((FeatureType.DATA, band),
-                                    folder=config.tiffs_folder,
+                                    folder=f's3://{config.bucket_name}/{config.tiffs_folder}',
                                     config=sh_config), f'Import band {band}')
                     for band in config.band_names]
-    # import_clp = (ImportFromTiff((FeatureType.DATA, config.clp_name),
-    #                              folder=config.tiffs_folder,
-    #                              config=sh_config), f'Import {config.clp_name}')
+    import_clp = (ImportFromTiff((FeatureType.DATA, config.clp_name),
+                                 folder=f's3://{config.bucket_name}/{config.tiffs_folder}',
+                                 config=sh_config), f'Import {config.clp_name}')
 
     import_mask = (ImportFromTiff((FeatureType.MASK, config.mask_name),
-                                  folder=config.masks_folder,
+                                  folder=f's3://{config.bucket_name}/{config.tiffs_folder}',
                                   config=sh_config), f'Import {config.mask_name}')
 
     rearrange_bands = (RearrangeBands(), 'Swap time and band axis')
-    add_timestamps = (AddTimestampsUpdateTime(config.tiffs_folder), 'Load timestamps')
+    add_timestamps = (AddTimestampsUpdateTime(f's3://{config.bucket_name}/{config.tiffs_folder}'), 'Load timestamps')
 
     merge_bands = (MergeFeatureTask(
         input_features={FeatureType.DATA: config.band_names},
@@ -183,28 +177,28 @@ def get_tiffs_to_eopatches_workflow(config: TiffsToEopatchConfig, delete_tiffs: 
 
     rename_mask = (RenameFeature((FeatureType.MASK, config.mask_name, config.is_data_mask)), 'Rename is data mask')
 
-    # calculate_clm = (CloudMasking(), 'Get CLM mask from CLP')
+    calculate_clm = (CloudMasking(), 'Get CLM mask from CLP')
 
-    save_task = (SaveTask(path=config.eopatches_folder, config=sh_config,
+    save_task = (SaveTask(path=f's3://{config.bucket_name}/{config.eopatches_folder}', config=sh_config,
                           overwrite_permission=OverwritePermission.OVERWRITE_FEATURES),  'Save EOPatch')
 
-    # filenames = [f'{band}.tif' for band in config.band_names] + \
-    #             [f'{config.mask_name}.tif', f'{config.clp_name}.tif', 'userdata.json']
-    # delete_files = (DeleteFiles(path=config.tiffs_folder, filenames=filenames), 'Delete batch files')
+    filenames = [f'{band}.tif' for band in config.band_names] + \
+                [f'{config.mask_name}.tif', f'{config.clp_name}.tif', 'userdata.json']
+    delete_files = (DeleteFiles(path=config.tiffs_folder, filenames=filenames), 'Delete batch files')
 
     workflow = [*import_bands,
-                # import_clp,
+                import_clp,
                 import_mask,
                 rearrange_bands,
                 add_timestamps,
                 merge_bands,
                 remove_bands,
                 rename_mask,
-                # calculate_clm,
+                calculate_clm,
                 save_task]
 
-    # if delete_tiffs:
-    #     workflow.append(delete_files)
+    if delete_tiffs:
+        workflow.append(delete_files)
 
     return LinearWorkflow(*workflow)
 
@@ -219,8 +213,8 @@ def get_exec_args(workflow: EOWorkflow, eopatch_list: List[str]) -> List[dict]:
 
         for task_name, task in tasks.items():
             if isinstance(task, ImportFromTiff):
-                band_name = task_name.split()[-1]
-                path = f'{band_name}/{name}.tiff'
+                tiff_name = task_name.split()[-1]
+                path = f'{name}/{tiff_name}.tif'
                 single_exec_dict[task] = dict(filename=path)
 
             if isinstance(task, SaveTask):
